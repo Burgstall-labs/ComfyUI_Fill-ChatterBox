@@ -4,8 +4,8 @@ A custom node extension for ComfyUI that adds text-to-speech (TTS) and voice con
 
 ## ✨ Enhanced Features
 
-### 🔥 **NEW: Extended Text Support with Auto-Chunking**
-- **No more 40-second limitation!** Process texts of any length
+### 🔥 **NEW: Extended Text Support with Auto-Chunking for TTS**
+- **No more 40-second limitation for TTS!** Process texts of any length
 - **Smart text chunking:** Automatically splits long texts into 130-word chunks for optimal model stability
 - **Seamless audio concatenation:** Chunks are processed individually and merged into one continuous audio output
 - **Consistent voice cloning:** Same reference audio is used across all chunks for voice consistency
