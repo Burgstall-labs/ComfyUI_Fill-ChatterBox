@@ -55,36 +55,95 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
     _tts_device = None
     
     @staticmethod
-    def chunk_text(text, max_words=90):  # Reduced from 130 to 90 words for better stability
+    def chunk_text(text, min_words=80, max_words=110):
         """
-        Split text into chunks of maximum word count.
+        Split text into chunks using intelligent sentence-aware algorithm.
+        
+        This method creates chunks that:
+        1. Are between min_words and max_words in length
+        2. End at sentence boundaries (., !, ?) when possible
+        3. Fall back to hard word limits for very long sentences
         
         Args:
             text: The input text to split.
-            max_words: Maximum number of words per chunk.
+            min_words: Minimum words per chunk before looking for sentence breaks.
+            max_words: Maximum words per chunk (hard limit for stability).
             
         Returns:
-            List of text chunks.
+            List of text chunks with enhanced logging.
         """
         if not text or not text.strip():
             return ["You need to add some text for me to talk."]
         
+        # Tokenize the text into words
         words = text.split()
-        if len(words) <= max_words:
+        total_words = len(words)
+        
+        if total_words <= max_words:
+            logger.info(f"Text is short enough ({total_words} words <= {max_words}), returning as single chunk")
             return [text]
         
         chunks = []
-        current_chunk = []
+        current_position = 0
+        chunk_number = 1
         
-        for word in words:
-            current_chunk.append(word)
-            if len(current_chunk) >= max_words:
-                chunks.append(" ".join(current_chunk))
-                current_chunk = []
+        logger.info(f"=== Smart Chunking Algorithm Started ===")
+        logger.info(f"Total words: {total_words}, Window: {min_words}-{max_words} words")
         
-        # Add remaining words as the last chunk
-        if current_chunk:
-            chunks.append(" ".join(current_chunk))
+        while current_position < total_words:
+            # Determine the boundaries for this chunk
+            chunk_start = current_position
+            min_end = min(chunk_start + min_words, total_words)
+            max_end = min(chunk_start + max_words, total_words)
+            
+            # If we're near the end of the text, take everything remaining
+            if max_end >= total_words:
+                chunk_words = words[chunk_start:]
+                chunk_text = " ".join(chunk_words)
+                chunks.append(chunk_text)
+                
+                logger.info(f"Chunk {chunk_number} (final): {len(chunk_words)} words - took remaining text")
+                logger.info(f"Chunk {chunk_number} text preview: {chunk_text[:100]}...")
+                break
+            
+            # Look for the best sentence break within our window
+            best_split_position = None
+            
+            # Search backwards from max_end to min_end for sentence endings
+            for pos in range(max_end - 1, min_end - 1, -1):  # Search backwards
+                word = words[pos]
+                if word.endswith(('.', '!', '?')):
+                    best_split_position = pos + 1  # Include the word with punctuation
+                    break
+            
+            # Determine final split position and reason
+            if best_split_position is not None:
+                # Found a good sentence break
+                split_position = best_split_position
+                chunk_words = words[chunk_start:split_position]
+                split_reason = f"sentence break at '{words[split_position-1]}'"
+            else:
+                # No sentence break found, use hard limit
+                split_position = max_end
+                chunk_words = words[chunk_start:split_position]
+                split_reason = f"hard limit (no sentence break in window)"
+                logger.warning(f"Chunk {chunk_number}: No sentence break found in {min_words}-{max_words} word window, using hard split")
+            
+            # Create the chunk
+            chunk_text = " ".join(chunk_words)
+            chunks.append(chunk_text)
+            
+            # Enhanced logging for this chunk
+            chunk_word_count = len(chunk_words)
+            chunk_char_count = len(chunk_text)
+            logger.info(f"Chunk {chunk_number}: {chunk_word_count} words, {chunk_char_count} chars - {split_reason}")
+            logger.info(f"Chunk {chunk_number} text preview: {chunk_text[:100]}...")
+            
+            # Move to the next chunk
+            current_position = split_position
+            chunk_number += 1
+        
+        logger.info(f"=== Smart Chunking Complete: {len(chunks)} chunks created ===")
         
         return chunks
     
@@ -174,7 +233,7 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
             Tuple of (audio, message)
         """
         # Split text into chunks with reduced size for better stability
-        text_chunks = self.chunk_text(text, max_words=90)  # Reduced from 130 to 90
+        text_chunks = self.chunk_text(text, min_words=80, max_words=110)
         total_chunks = len(text_chunks)
         
         # Determine device to use
@@ -191,8 +250,8 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
         # Enhanced logging for diagnostics
         logger.info(f"=== ChatterBox TTS Processing Started ===")
         logger.info(f"Original text length: {len(text)} characters, {len(text.split())} words")
-        logger.info(f"Text split into {total_chunks} chunks (max 90 words each)")
-        message += f"\nText split into {total_chunks} chunks (max 90 words each)"
+        logger.info(f"Text split into {total_chunks} chunks (80-110 words each)")
+        message += f"\nText split into {total_chunks} chunks (80-110 words each)"
         
         # Log each chunk for debugging
         for i, chunk in enumerate(text_chunks):

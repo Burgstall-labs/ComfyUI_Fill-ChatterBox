@@ -4,12 +4,13 @@ A custom node extension for ComfyUI that adds text-to-speech (TTS) and voice con
 
 ## ✨ Enhanced Features
 
-### 🔥 **NEW: Extended Text Support with Auto-Chunking**
+### 🔥 **NEW: Extended Text Support with Smart Chunking**
 - **No more 40-second limitation!** Process texts of any length
-- **Smart text chunking:** Automatically splits long texts into 130-word chunks for optimal model stability
-- **Seamless audio concatenation:** Chunks are processed individually and merged into one continuous audio output
-- **Consistent voice cloning:** Same reference audio is used across all chunks for voice consistency
-- **Progress tracking:** Visual progress bar shows chunk processing status
+- **🧠 Intelligent sentence-aware chunking:** Automatically splits long texts at natural sentence boundaries (periods, exclamation marks, question marks)
+- **📏 Adaptive chunk sizing:** 80-110 word chunks that end at sentence breaks for optimal quality and stability
+- **🔄 Seamless audio concatenation:** Chunks are processed individually and merged into one continuous audio output
+- **🎯 Consistent voice cloning:** Same reference audio is used across all chunks for voice consistency
+- **📊 Progress tracking:** Visual progress bar shows chunk processing status with detailed logging
 
 ![ChatterBox Example](web/image.png)
 
@@ -17,7 +18,8 @@ A custom node extension for ComfyUI that adds text-to-speech (TTS) and voice con
 
 ### Text-to-Speech Node (FL Chatterbox TTS)
 - **Extended text processing:** Handle texts longer than the original 40-second limit
-- **Automatic chunking:** Text is intelligently split into manageable segments
+- **🧠 Smart chunking:** Text is intelligently split at sentence boundaries within safe word limits (80-110 words)
+- **🎵 Natural audio flow:** Proper sentence endings ensure natural pauses and intonation
 - **Voice cloning:** Use audio prompts for consistent voice replication across all chunks
 - **Seamless output:** Individual audio chunks are concatenated into one continuous stream
 - **GPU/CPU support:** Automatic fallback and device optimization
@@ -61,29 +63,41 @@ A custom node extension for ComfyUI that adds text-to-speech (TTS) and voice con
 
 ## Technical Details
 
-### Text Chunking Algorithm
-- Splits input text by word boundaries
-- Maximum 130 words per chunk (optimized for model stability)
-- Preserves sentence structure where possible
-- Handles edge cases (empty text, very short text)
+### Smart Sentence-Aware Chunking Algorithm
+- **Intelligent boundaries:** Splits text at natural sentence endings (`.`, `!`, `?`) within safe word limits
+- **Adaptive sizing:** Chunks range from 80-110 words, optimized for model stability and audio quality
+- **Backwards search:** Algorithm searches backwards from the maximum limit to find the best sentence break
+- **Fallback protection:** Uses hard word limits for extremely long sentences to prevent model failure
+- **Quality optimization:** Natural sentence endings produce better intonation and speech flow
 
 ### Audio Concatenation
 - Uses PyTorch tensor concatenation for efficiency
 - Maintains consistent sample rate (16kHz) across chunks
 - No audio artifacts at chunk boundaries
 - Single continuous waveform output
+- Enhanced validation prevents corrupted segments from affecting final output
 
 ### Performance Optimizations
 - Model persistence across chunks (optional)
 - GPU memory management with automatic cleanup
 - Progress tracking for long text processing
 - Efficient tensor operations for concatenation
+- Comprehensive error handling with chunk-level recovery
 
 ## Change Log
 
-### Latest (Fork Enhancement)
+### Latest (Fork Enhancement v2.0)
+- **🚀 MAJOR:** Intelligent sentence-aware chunking algorithm replaces simple word counting
+- **🧠 NEW:** Smart text splitting at natural sentence boundaries (periods, exclamation marks, question marks)
+- **📏 NEW:** Adaptive chunk sizing (80-110 words) with backwards search for optimal sentence breaks
+- **🎵 IMPROVED:** Dramatically better audio quality with natural pauses and intonation
+- **🔧 IMPROVED:** Enhanced fallback protection for extremely long sentences
+- **📊 IMPROVED:** Comprehensive logging with chunk-by-chunk analysis and reasoning
+- **⚡ IMPROVED:** Better stability with conservative word limits and validation checks
+
+### Previous (Fork Enhancement v1.0)
 - **🚀 MAJOR:** Removed 40-second text limitation through intelligent chunking
-- **✨ NEW:** Automatic text splitting into 130-word segments
+- **✨ NEW:** Automatic text splitting into 90-word segments
 - **✨ NEW:** Seamless audio concatenation of processed chunks
 - **✨ NEW:** Enhanced progress tracking for chunk processing
 - **🔧 IMPROVED:** Better error handling for long text processing
