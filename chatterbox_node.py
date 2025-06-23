@@ -49,6 +49,40 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
     _tts_model = None
     _tts_device = None
     
+    @staticmethod
+    def chunk_text(text, max_words=130):
+        """
+        Split text into chunks of maximum word count.
+        
+        Args:
+            text: The input text to split.
+            max_words: Maximum number of words per chunk.
+            
+        Returns:
+            List of text chunks.
+        """
+        if not text or not text.strip():
+            return ["You need to add some text for me to talk."]
+        
+        words = text.split()
+        if len(words) <= max_words:
+            return [text]
+        
+        chunks = []
+        current_chunk = []
+        
+        for word in words:
+            current_chunk.append(word)
+            if len(current_chunk) >= max_words:
+                chunks.append(" ".join(current_chunk))
+                current_chunk = []
+        
+        # Add remaining words as the last chunk
+        if current_chunk:
+            chunks.append(" ".join(current_chunk))
+        
+        return chunks
+    
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -86,6 +120,10 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
         Returns:
             Tuple of (audio, message)
         """
+        # Split text into chunks
+        text_chunks = self.chunk_text(text, max_words=130)
+        total_chunks = len(text_chunks)
+        
         # Determine device to use
         device = "cpu" if use_cpu else ("mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
         if use_cpu:
@@ -96,6 +134,8 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
              message = "Using CUDA (NVIDIA GPU) for inference"
         else:
             message = f"Using {device} for inference" # Should be CPU if no GPU found
+        
+        message += f"\nText split into {total_chunks} chunks (max 130 words each)"
         
         # Create temporary files for any audio inputs
         import tempfile
@@ -125,9 +165,10 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
                 audio_prompt_path = None
         
         tts_model = None
-        wav = None # Initialize wav to None
+        audio_segments = []
         audio_data = {"waveform": torch.zeros((1, 2, 1)), "sample_rate": 16000} # Initialize with empty audio
-        pbar = ProgressBar(100) # Simple progress bar for overall process
+        pbar = ProgressBar(100)
+        
         try:
             # Load the TTS model or reuse if loaded and device matches
             if FL_ChatterboxTTSNode._tts_model is not None and FL_ChatterboxTTSNode._tts_device == device:
@@ -143,11 +184,10 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
                     if torch.backends.mps.is_available():
                          torch.mps.empty_cache() # Clear MPS cache if possible
 
-
                 message += f"\nLoading TTS model on {device}..."
                 pbar.update_absolute(10) # Indicate model loading started
                 tts_model = ChatterboxTTS.from_pretrained(device=device)
-                pbar.update_absolute(50) # Indicate model loading finished
+                pbar.update_absolute(20) # Indicate model loading finished
 
                 if keep_model_loaded:
                     FL_ChatterboxTTSNode._tts_model = tts_model
@@ -156,26 +196,38 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
                 else:
                     message += "\nModel will be unloaded after use."
 
-            # Generate speech
-            message += f"\nGenerating speech for: {text[:50]}..." if len(text) > 50 else f"\nGenerating speech for: {text}"
-            if audio_prompt_path:
-                message += f"\nUsing audio prompt: {audio_prompt_path}"
+            # Process each text chunk
+            for i, chunk in enumerate(text_chunks):
+                chunk_progress = 20 + int((i / total_chunks) * 70)  # Progress from 20% to 90%
+                pbar.update_absolute(chunk_progress)
+                
+                message += f"\nProcessing chunk {i+1}/{total_chunks}: {chunk[:50]}..." if len(chunk) > 50 else f"\nProcessing chunk {i+1}/{total_chunks}: {chunk}"
+                
+                # Generate speech for this chunk
+                wav = tts_model.generate(
+                    text=chunk,
+                    audio_prompt_path=audio_prompt_path,
+                    exaggeration=exaggeration,
+                    cfg_weight=cfg_weight,
+                    temperature=temperature,
+                )
+                
+                # Store the audio segment
+                audio_segments.append(wav)
             
-            pbar.update_absolute(60) # Indicate generation started
-            wav = tts_model.generate(
-                text=text,
-                audio_prompt_path=audio_prompt_path,
-                exaggeration=exaggeration,
-                cfg_weight=cfg_weight,
-                temperature=temperature,
-            )
-            pbar.update_absolute(90) # Indicate generation finished
+            pbar.update_absolute(90) # Indicate all chunks processed
             
-            audio_data = {
-                "waveform": wav.unsqueeze(0),  # Add batch dimension
-                "sample_rate": tts_model.sr
-            }
-            message += f"\nSpeech generated successfully"
+            # Concatenate all audio segments
+            if audio_segments:
+                concatenated_wav = torch.cat(audio_segments, dim=1)  # Concatenate along time dimension
+                audio_data = {
+                    "waveform": concatenated_wav.unsqueeze(0),  # Add batch dimension
+                    "sample_rate": tts_model.sr
+                }
+                message += f"\nSpeech generated successfully from {total_chunks} chunks"
+            else:
+                message += f"\nNo audio segments generated"
+            
             return (audio_data, message)
             
         except RuntimeError as e:
@@ -201,27 +253,37 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
                     if torch.backends.mps.is_available():
                          torch.mps.empty_cache() # Clear MPS cache if possible
 
-
                 message += f"\nLoading TTS model on {device}..."
                 pbar.update_absolute(10) # Indicate model loading started (fallback)
                 tts_model = ChatterboxTTS.from_pretrained(device=device)
-                pbar.update_absolute(50) # Indicate model loading finished (fallback)
-                # Note: keep_model_loaded logic is applied after successful generation
-                # to avoid keeping a failed model loaded.
-
-                wav = tts_model.generate(
-                    text=text,
-                    audio_prompt_path=audio_prompt_path,
-                    exaggeration=exaggeration,
-                    cfg_weight=cfg_weight,
-                    temperature=temperature,
-                )
-                pbar.update_absolute(90) # Indicate generation finished (fallback)
-                audio_data = {
-                    "waveform": wav.unsqueeze(0),  # Add batch dimension
-                    "sample_rate": tts_model.sr
-                }
-                message += f"\nSpeech generated successfully after fallback."
+                pbar.update_absolute(20) # Indicate model loading finished (fallback)
+                
+                # Retry processing all chunks with CPU
+                audio_segments = []
+                for i, chunk in enumerate(text_chunks):
+                    chunk_progress = 20 + int((i / total_chunks) * 70)  # Progress from 20% to 90%
+                    pbar.update_absolute(chunk_progress)
+                    
+                    wav = tts_model.generate(
+                        text=chunk,
+                        audio_prompt_path=audio_prompt_path,
+                        exaggeration=exaggeration,
+                        cfg_weight=cfg_weight,
+                        temperature=temperature,
+                    )
+                    audio_segments.append(wav)
+                
+                pbar.update_absolute(90) # Indicate all chunks processed (fallback)
+                
+                # Concatenate all audio segments
+                if audio_segments:
+                    concatenated_wav = torch.cat(audio_segments, dim=1)  # Concatenate along time dimension
+                    audio_data = {
+                        "waveform": concatenated_wav.unsqueeze(0),  # Add batch dimension
+                        "sample_rate": tts_model.sr
+                    }
+                    message += f"\nSpeech generated successfully after fallback from {total_chunks} chunks."
+                
                 return (audio_data, message)
             else:
                 message += f"\nError during TTS: {str(e)}"
@@ -246,35 +308,6 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
                      torch.mps.empty_cache() # Clear MPS cache if possible
 
         pbar.update_absolute(100) # Ensure progress bar completes on success or error
-        return (audio_data, message) # Fallback return, should ideally not be reached
-
-
-        # If generation was successful and keep_model_loaded is True, store the model
-        if keep_model_loaded and tts_model is not None:
-             FL_ChatterboxTTSNode._tts_model = tts_model
-             FL_ChatterboxTTSNode._tts_device = device
-             message += "\nModel will be kept loaded in memory."
-        elif not keep_model_loaded and FL_ChatterboxTTSNode._tts_model is not None:
-             # This case handles successful generation when keep_model_loaded was True previously
-             # but is now False. Ensure the model is unloaded.
-             message += "\nUnloading TTS model as keep_model_loaded is now False."
-             FL_ChatterboxTTSNode._tts_model = None
-             FL_ChatterboxTTSNode._tts_device = None
-             if torch.cuda.is_available():
-                 torch.cuda.empty_cache() # Clear CUDA cache if possible
-             if torch.backends.mps.is_available():
-                 torch.mps.empty_cache() # Clear MPS cache if possible
-
-
-        # Create audio data structure for the output
-        audio_data = {
-            "waveform": wav.unsqueeze(0),  # Add batch dimension
-            "sample_rate": tts_model.sr if tts_model else 16000 # Use default sample rate if model loading failed
-        }
-        
-        message += f"\nSpeech generated successfully"
-        pbar.update_absolute(100) # Ensure progress bar completes on success
-        
         return (audio_data, message)
 
 # Voice Conversion node
