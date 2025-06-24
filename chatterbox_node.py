@@ -5,6 +5,7 @@ import numpy as np
 from pathlib import Path
 from typing import Optional
 import logging
+import gc
 
 # Import directly from the chatterbox package
 from .local_chatterbox.chatterbox.tts import ChatterboxTTS
@@ -496,13 +497,18 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
                 if os.path.exists(temp_file):
                     os.unlink(temp_file)
                     logger.info(f"Cleaned up temp file: {temp_file}")
-            # Safe VRAM cleanup: Only remove reference, let Python GC handle cleanup
-            if not keep_model_loaded and FL_ChatterboxTTSNode._tts_model is not None:
-                logger.info("Unloading TTS model as keep_model_loaded is False")
-                message += "\nUnloading TTS model as keep_model_loaded is False."
-                FL_ChatterboxTTSNode._tts_model = None
-                FL_ChatterboxTTSNode._tts_device = None
-                # Gentle cache cleanup (no forced CPU movement)
+
+            # Force VRAM cleanup if model is not kept loaded
+            if not keep_model_loaded and 'tts_model' in locals() and tts_model is not None:
+                logger.info("Unloading TTS model and forcing VRAM cleanup to prevent OOM.")
+                message += "\nUnloading TTS model and forcing VRAM cleanup."
+                del tts_model
+                if FL_ChatterboxTTSNode._tts_model is not None:
+                    FL_ChatterboxTTSNode._tts_model = None
+                    FL_ChatterboxTTSNode._tts_device = None
+                
+                # Force garbage collection and empty CUDA cache
+                gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 if torch.backends.mps.is_available():
@@ -674,39 +680,33 @@ class FL_ChatterboxVCNode(AudioNodeBase):
             for temp_file in temp_files:
                 if os.path.exists(temp_file):
                     os.unlink(temp_file)
-            # If keep_model_loaded is False, ensure model is not stored
-            # This is done here to ensure model is only kept if generation was successful
-            if not keep_model_loaded and FL_ChatterboxVCNode._vc_model is not None:
-                 message += "\nUnloading VC model as keep_model_loaded is False."
-                 FL_ChatterboxVCNode._vc_model = None
-                 FL_ChatterboxVCNode._vc_device = None
-                 # Gentle cache cleanup
-                 if torch.cuda.is_available():
-                     torch.cuda.empty_cache()
-                 if torch.backends.mps.is_available():
-                     torch.mps.empty_cache()
+
+            # Force VRAM cleanup if model is not kept loaded
+            if not keep_model_loaded and 'vc_model' in locals() and vc_model is not None:
+                logger.info("Unloading VC model and forcing VRAM cleanup to prevent OOM.")
+                message += "\nUnloading VC model and forcing VRAM cleanup."
+                del vc_model
+                if FL_ChatterboxVCNode._vc_model is not None:
+                    FL_ChatterboxVCNode._vc_model = None
+                    FL_ChatterboxVCNode._vc_device = None
+
+                # Force garbage collection and empty CUDA cache
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                if torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
 
         # If generation was successful and keep_model_loaded is True, store the model
-        if keep_model_loaded and vc_model is not None:
+        if keep_model_loaded and 'vc_model' in locals() and vc_model is not None:
              FL_ChatterboxVCNode._vc_model = vc_model
              FL_ChatterboxVCNode._vc_device = device
              message += "\nModel will be kept loaded in memory."
-        elif not keep_model_loaded and FL_ChatterboxVCNode._vc_model is not None:
-             # This case handles successful generation when keep_model_loaded was True previously
-             # but is now False. Ensure the model is unloaded.
-             message += "\nUnloading VC model as keep_model_loaded is now False."
-             FL_ChatterboxVCNode._vc_model = None
-             FL_ChatterboxVCNode._vc_device = None
-             # Gentle cache cleanup
-             if torch.cuda.is_available():
-                 torch.cuda.empty_cache()
-             if torch.backends.mps.is_available():
-                 torch.mps.empty_cache()
 
         # Create audio data structure for the output
         audio_data = {
             "waveform": converted_wav.unsqueeze(0),  # Add batch dimension
-            "sample_rate": vc_model.sr if vc_model else 16000 # Use default sample rate if model loading failed
+            "sample_rate": 16000  # Use fixed sample rate for consistency
         }
         
         message += f"\nVoice converted successfully"
