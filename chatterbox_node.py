@@ -311,13 +311,8 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
             else:
                 if FL_ChatterboxTTSNode._tts_model is not None:
                     logger.info("Unloading previous TTS model (device mismatch)")
-                    message += f"\nUnloading previous TTS model (device mismatch or keep_model_loaded is False)..."
-                    FL_ChatterboxTTSNode._tts_model = None
-                    FL_ChatterboxTTSNode._tts_device = None
-                    if torch.cuda.is_available():
-                         torch.cuda.empty_cache() # Clear CUDA cache if possible
-                    if torch.backends.mps.is_available():
-                         torch.mps.empty_cache() # Clear MPS cache if possible
+                    message += f"\nUnloading previous TTS model (device mismatch)..."
+                    self.unload_model()  # Use robust unloading method
 
                 logger.info(f"Loading TTS model on {device}")
                 message += f"\nLoading TTS model on {device}..."
@@ -423,13 +418,8 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
                 # Unload previous model if it exists
                 if FL_ChatterboxTTSNode._tts_model is not None:
                     logger.info("Unloading previous TTS model for CPU fallback")
-                    message += f"\nUnloading previous TTS model..."
-                    FL_ChatterboxTTSNode._tts_model = None
-                    FL_ChatterboxTTSNode._tts_device = None
-                    if torch.cuda.is_available():
-                         torch.cuda.empty_cache() # Clear CUDA cache if possible
-                    if torch.backends.mps.is_available():
-                         torch.mps.empty_cache() # Clear MPS cache if possible
+                    message += f"\nUnloading previous TTS model for CPU fallback..."
+                    self.unload_model()  # Use robust unloading method
 
                 logger.info("Loading TTS model on CPU for fallback")
                 message += f"\nLoading TTS model on {device}..."
@@ -509,16 +499,68 @@ class FL_ChatterboxTTSNode(AudioNodeBase):
             if not keep_model_loaded and FL_ChatterboxTTSNode._tts_model is not None:
                 logger.info("Unloading TTS model as keep_model_loaded is False")
                 message += "\nUnloading TTS model as keep_model_loaded is False."
-                FL_ChatterboxTTSNode._tts_model = None
-                FL_ChatterboxTTSNode._tts_device = None
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache() # Clear CUDA cache if possible
-                if torch.backends.mps.is_available():
-                    torch.mps.empty_cache() # Clear MPS cache if possible
+                self.unload_model()  # Use robust unloading method
 
         logger.info("=== ChatterBox TTS Processing Complete ===")
         pbar.update_absolute(100) # Ensure progress bar completes on success or error
         return (audio_data, message)
+
+    @classmethod
+    def unload_model(cls):
+        """
+        Robust model unloading with explicit VRAM cleanup.
+        
+        This method performs the following steps:
+        1. Moves the model from GPU to CPU (critical for VRAM release)
+        2. Explicitly deletes model references
+        3. Clears CUDA cache effectively
+        4. Provides detailed logging for transparency
+        
+        Returns:
+            bool: True if model was unloaded, False if no model was loaded
+        """
+        if cls._tts_model is None:
+            logger.info("No TTS model loaded, nothing to unload")
+            return False
+            
+        try:
+            logger.info("=== Starting TTS Model Unloading ===")
+            
+            # Step 1: Move model to CPU (critical for VRAM release)
+            logger.info("Moving TTS model from GPU to CPU...")
+            cls._tts_model = cls._tts_model.to('cpu')
+            logger.info("TTS model successfully moved to CPU")
+            
+            # Step 2: Explicitly delete model references
+            logger.info("Deleting TTS model references...")
+            del cls._tts_model
+            cls._tts_model = None
+            cls._tts_device = None
+            logger.info("TTS model references cleared")
+            
+            # Step 3: Clear CUDA cache (now effective since model is off GPU)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info("CUDA cache cleared")
+                
+            # Step 4: Clear MPS cache if available
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+                logger.info("MPS cache cleared")
+                
+            logger.info("=== TTS Model Unloading Complete ===")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during TTS model unloading: {str(e)}")
+            # Fallback: still clear references even if moving to CPU failed
+            cls._tts_model = None
+            cls._tts_device = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+            return False
 
 # Voice Conversion node
 class FL_ChatterboxVCNode(AudioNodeBase):
@@ -527,6 +569,63 @@ class FL_ChatterboxVCNode(AudioNodeBase):
     """
     _vc_model = None
     _vc_device = None
+    
+    @classmethod
+    def unload_model(cls):
+        """
+        Robust model unloading with explicit VRAM cleanup for Voice Conversion.
+        
+        This method performs the following steps:
+        1. Moves the model from GPU to CPU (critical for VRAM release)
+        2. Explicitly deletes model references
+        3. Clears CUDA cache effectively
+        4. Provides detailed logging for transparency
+        
+        Returns:
+            bool: True if model was unloaded, False if no model was loaded
+        """
+        if cls._vc_model is None:
+            logger.info("No VC model loaded, nothing to unload")
+            return False
+            
+        try:
+            logger.info("=== Starting VC Model Unloading ===")
+            
+            # Step 1: Move model to CPU (critical for VRAM release)
+            logger.info("Moving VC model from GPU to CPU...")
+            cls._vc_model = cls._vc_model.to('cpu')
+            logger.info("VC model successfully moved to CPU")
+            
+            # Step 2: Explicitly delete model references
+            logger.info("Deleting VC model references...")
+            del cls._vc_model
+            cls._vc_model = None
+            cls._vc_device = None
+            logger.info("VC model references cleared")
+            
+            # Step 3: Clear CUDA cache (now effective since model is off GPU)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info("CUDA cache cleared")
+                
+            # Step 4: Clear MPS cache if available
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+                logger.info("MPS cache cleared")
+                
+            logger.info("=== VC Model Unloading Complete ===")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during VC model unloading: {str(e)}")
+            # Fallback: still clear references even if moving to CPU failed
+            cls._vc_model = None
+            cls._vc_device = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+            return False
     
     @classmethod
     def INPUT_TYPES(cls):
@@ -601,13 +700,8 @@ class FL_ChatterboxVCNode(AudioNodeBase):
                 message += f"\nReusing loaded VC model on {device}..."
             else:
                 if FL_ChatterboxVCNode._vc_model is not None:
-                    message += f"\nUnloading previous VC model (device mismatch or keep_model_loaded is False)..."
-                    FL_ChatterboxVCNode._vc_model = None
-                    FL_ChatterboxVCNode._vc_device = None
-                    if torch.cuda.is_available():
-                         torch.cuda.empty_cache() # Clear CUDA cache if possible
-                    if torch.backends.mps.is_available():
-                         torch.mps.empty_cache() # Clear MPS cache if possible
+                    message += f"\nUnloading previous VC model (device mismatch)..."
+                    self.unload_model()  # Use robust unloading method
 
                 message += f"\nLoading VC model on {device}..."
                 pbar.update_absolute(10) # Indicate model loading started
@@ -646,13 +740,8 @@ class FL_ChatterboxVCNode(AudioNodeBase):
                 device = "cpu"
                 # Unload previous model if it exists
                 if FL_ChatterboxVCNode._vc_model is not None:
-                    message += f"\nUnloading previous VC model..."
-                    FL_ChatterboxVCNode._vc_model = None
-                    FL_ChatterboxVCNode._vc_device = None
-                    if torch.cuda.is_available():
-                         torch.cuda.empty_cache() # Clear CUDA cache if possible
-                    if torch.backends.mps.is_available():
-                         torch.mps.empty_cache() # Clear MPS cache if possible
+                    message += f"\nUnloading previous VC model for CPU fallback..."
+                    self.unload_model()  # Use robust unloading method
 
                 message += f"\nLoading VC model on {device}..."
                 pbar.update_absolute(10) # Indicate model loading started (fallback)
@@ -690,12 +779,7 @@ class FL_ChatterboxVCNode(AudioNodeBase):
             # This is done here to ensure model is only kept if generation was successful
             if not keep_model_loaded and FL_ChatterboxVCNode._vc_model is not None:
                  message += "\nUnloading VC model as keep_model_loaded is False."
-                 FL_ChatterboxVCNode._vc_model = None
-                 FL_ChatterboxVCNode._vc_device = None
-                 if torch.cuda.is_available():
-                     torch.cuda.empty_cache() # Clear CUDA cache if possible
-                 if torch.backends.mps.is_available():
-                     torch.mps.empty_cache() # Clear MPS cache if possible
+                 self.unload_model()  # Use robust unloading method
 
         # If generation was successful and keep_model_loaded is True, store the model
         if keep_model_loaded and vc_model is not None:
@@ -706,12 +790,7 @@ class FL_ChatterboxVCNode(AudioNodeBase):
              # This case handles successful generation when keep_model_loaded was True previously
              # but is now False. Ensure the model is unloaded.
              message += "\nUnloading VC model as keep_model_loaded is now False."
-             FL_ChatterboxVCNode._vc_model = None
-             FL_ChatterboxVCNode._vc_device = None
-             if torch.cuda.is_available():
-                 torch.cuda.empty_cache() # Clear CUDA cache if possible
-             if torch.backends.mps.is_available():
-                 torch.mps.empty_cache() # Clear MPS cache if possible
+             self.unload_model()  # Use robust unloading method
 
         # Create audio data structure for the output
         audio_data = {
